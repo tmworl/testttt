@@ -3,7 +3,7 @@
 // Platform capability detection with function-based architecture
 // Implements unified API pattern for consistent interface access
 
-import { Platform, Dimensions, PixelRatio } from 'react-native';
+import { Platform, Dimensions, PixelRatio, NativeModules } from 'react-native';
 
 // Cache window dimensions for performance optimization
 const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get('window');
@@ -12,6 +12,18 @@ const PIXEL_RATIO = PixelRatio.get();
 // Platform identification constants
 const IS_IOS = Platform.OS === 'ios';
 const IS_ANDROID = Platform.OS === 'android';
+
+// Android API level detection - critical for M3 support determination
+const ANDROID_API_LEVEL = IS_ANDROID ? 
+  parseInt(Platform.Version, 10) : 0;  // Platform.Version is API level on Android
+
+/**
+ * Determines if device natively supports Material Design 3
+ * M3 is natively supported on Android 12 (API 31) and above
+ */
+const supportsM3 = () => {
+  return IS_ANDROID && ANDROID_API_LEVEL >= 31;
+};
 
 /**
  * Detects if running on iPhone 12 or newer design models with squared edges.
@@ -95,8 +107,16 @@ const getStatusBarHeight = () => {
     return hasNotchOrDynamicIsland() ? 47 : 20;
   }
   
-  // Android implementation - fixed default value
-  return 24;
+  // Android implementation - check for cutout support
+  if (IS_ANDROID) {
+    // For Android 28+ (P), we can access StatusBar height directly
+    if (ANDROID_API_LEVEL >= 28) {
+      return Platform.constants?.StatusBarHeight || 24;
+    }
+    return 24; // Default for older versions
+  }
+  
+  return 24; // Fallback
 };
 
 /**
@@ -107,8 +127,17 @@ const getBottomInset = () => {
     return hasHomeIndicator() ? 34 : 0;
   }
   
-  // Android doesn't have home indicator but may have system navigation
-  return 0; // Would need additional detection for gesture navigation
+  // Android gesture navigation detection - approximation based on API level
+  if (IS_ANDROID && ANDROID_API_LEVEL >= 29) { // Android 10+
+    // Check window height ratio as indicator of gesture navigation
+    // This is an approximation since there's no direct API to check
+    const screenRatio = WINDOW_HEIGHT / WINDOW_WIDTH;
+    if (screenRatio > 1.95) { // Taller devices likely use gesture navigation
+      return 16; // Approximation for gesture bar height
+    }
+  }
+  
+  return 0; // Default when no bottom inset needed
 };
 
 /**
@@ -123,6 +152,12 @@ const supportsBlurEffects = () => {
     if (IS_IOS) {
       return true;
     }
+    
+    // For Android, only enable on high-performance devices with API 31+ (Android 12)
+    if (IS_ANDROID && ANDROID_API_LEVEL >= 31 && PIXEL_RATIO >= 3) {
+      return true;
+    }
+    
     return false;
   } catch (e) {
     return false;
@@ -136,10 +171,59 @@ const supportsHaptics = () => {
   // Feature detection for haptics
   try {
     // Only iOS supports consistent haptics through our implementation
-    return IS_IOS;
+    if (IS_IOS) {
+      return true;
+    }
+    
+    // For Android 10+ (API 29+), check for hardware capability
+    if (IS_ANDROID && ANDROID_API_LEVEL >= 29) {
+      // This is a rough approximation - in production you might query the Vibrator service
+      return true;
+    }
+    
+    return false;
   } catch (e) {
     return false;
   }
+};
+
+/**
+ * Returns the appropriate navigation bar height according to platform guidelines
+ * This is critical for proper M3 implementation
+ */
+const getNavigationBarHeight = () => {
+  if (IS_ANDROID) {
+    // Material Design 3 navigation bar is taller (80dp)
+    if (supportsM3()) {
+      return 80;
+    }
+    // MD2 navigation bar is 56dp
+    return 56;
+  }
+  
+  // iOS tab bar standard height
+  return IS_IOS ? 49 : 56;
+};
+
+/**
+ * Returns the appropriate tab bar padding values according to platform guidelines
+ * Particularly important for M3 implementation
+ */
+const getNavigationBarPadding = () => {
+  if (IS_ANDROID && supportsM3()) {
+    return {
+      top: 12,      // 12dp top padding in M3
+      bottom: 16,   // 16dp bottom padding in M3
+      indicator: 4  // 4dp between active indicator and label
+    };
+  }
+  
+  // Default values for other platforms
+  return {
+    top: 8,
+    bottom: 8,
+    indicator: 0 // No indicator spacing for other platforms
+  };
 };
 
 /**
@@ -181,10 +265,19 @@ const getSafeAreaInsets = () => {
  * @returns {any} Selected implementation based on current platform
  */
 const select = (options) => {
-  const { ios, android, ...rest } = options;
+  const { ios, android, androidM3, androidLegacy, ...rest } = options;
+  
+  // Enhanced selection logic with M3 support
+  if (IS_ANDROID) {
+    // Check for M3-specific implementation first
+    if (supportsM3() && androidM3 !== undefined) return androidM3;
+    // Check for legacy Android implementation
+    if (!supportsM3() && androidLegacy !== undefined) return androidLegacy;
+    // Fall back to general Android implementation
+    if (android !== undefined) return android;
+  }
   
   if (IS_IOS && ios !== undefined) return ios;
-  if (IS_ANDROID && android !== undefined) return android;
   
   // Handle specific fallbacks for other platforms
   const defaultOption = rest.default;
@@ -192,22 +285,25 @@ const select = (options) => {
 };
 
 // Export a comprehensive platform detection API
-// IMPORTANT: Exported as callable functions to match consumer expectations
 export default {
   isIOS: IS_IOS,
   isAndroid: IS_ANDROID,
-  isIPhone12OrNewer,  // Export function reference, not its return value
-  hasNotchOrDynamicIsland,  // Export function reference
-  hasDynamicIsland,  // Export function reference - KEY FIX FOR YOUR ERROR
-  hasFaceID,  // Export function reference
-  hasHomeIndicator,  // Export function reference
+  androidApiLevel: ANDROID_API_LEVEL,
+  supportsM3, // Function references maintain the architectural pattern
+  isIPhone12OrNewer,
+  hasNotchOrDynamicIsland,
+  hasDynamicIsland,
+  hasFaceID,
+  hasHomeIndicator,
   getStatusBarHeight,
   getBottomInset,
-  supportsBlurEffects,  // Export function reference
-  supportsHaptics,  // Export function reference
+  getNavigationBarHeight, // New M3-specific function
+  getNavigationBarPadding, // New M3-specific function
+  supportsBlurEffects,
+  supportsHaptics,
   getMaxBlurIntensity,
   getSafeAreaInsets,
-  select,
+  select, // Enhanced platform selection with M3 support
   
   // Add common device metrics for rendering optimizations
   metrics: {

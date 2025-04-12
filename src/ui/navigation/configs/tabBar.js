@@ -2,9 +2,10 @@
 //
 // Enhanced tab bar configuration with iOS 18 material integration
 // Implements backdrop material effects and safe area composition
+// Now with full Material Design 3 navigation bar implementation
 
-import React from 'react';
-import { StyleSheet, Platform, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { StyleSheet, Platform, View, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import platformDetection from '../../platform/detection';
 import visualProperties from '../../platform/visualProperties';
@@ -13,8 +14,51 @@ import navigationTheme from '../theme';
 
 const { tokens, platform } = navigationTheme;
 
+// Determine if we should use Material Design 3 configuration
+const useM3 = platformDetection.isAndroid && platformDetection.supportsM3();
+
+/**
+ * Renders the Material Design 3 active indicator component with proper shape and animations
+ * This is a core visual element of the Material Design 3 navigation bar
+ * 
+ * @param {Object} props Component props
+ * @param {boolean} props.active Whether the tab is currently active
+ * @param {boolean} props.hasLabel Whether the tab has a visible label
+ * @param {boolean} props.focused Whether the navigation bar itself has focus
+ * @param {number} props.tabWidth Width of the containing tab (for proper sizing)
+ * @returns {React.ReactElement} The active indicator component
+ */
+const M3ActiveIndicator = ({ active, hasLabel, focused, tabWidth }) => {
+  if (!useM3 || !active) return null;
+  
+  // Extract dimensions from tokens
+  const { height, width, widthIconOnly, borderRadius } = tokens.components.tabBar.activeIndicator;
+  
+  // Determine width based on presence of label
+  const indicatorWidth = hasLabel ? width : widthIconOnly;
+  
+  return (
+    <View style={[
+      styles.m3ActiveIndicator,
+      {
+        width: indicatorWidth,
+        height,
+        borderRadius,
+        backgroundColor: tokens.colors.tint.tabBarActiveIndicator,
+        // Strategic positioning to ensure proper alignment
+        left: (tabWidth - indicatorWidth) / 2,
+        // Hardware acceleration for optimal animation performance
+        ...Platform.select({
+          android: { renderToHardwareTextureAndroid: true }
+        }),
+      }
+    ]} />
+  );
+};
+
 /**
  * Generate tab bar icon component with optimized rendering characteristics
+ * Enhanced with M3 icon state system and hardware acceleration
  * 
  * @param {string} name - Base name of the Ionicons icon
  * @param {boolean} focused - Whether the tab is focused
@@ -23,21 +67,34 @@ const { tokens, platform } = navigationTheme;
  * @returns {React.ReactElement} Memoized Ionicons component with optimal rendering properties
  */
 const getTabBarIcon = (name) => ({ focused, color, size }) => {
-  // Use outline version when not focused, solid when focused for iOS 18 style
-  const iconName = focused ? name : `${name}-outline`;
+  // Get icon state based on platform and active status
+  const iconState = visualProperties.getNavigationIconState(name, focused);
   
-  // iOS 18 enhances the visual weight contrast between selected/unselected
-  const effectiveSize = focused ? size * 1.05 : size;
+  // Use the filled/outlined state based on focus for M3
+  const iconName = iconState.name;
   
+  // Apply platform-specific size adjustments
+  const effectiveSize = iconState.size || size;
+  
+  // Scale factor for visual feedback (subtle enhancement for M3)
+  const scale = iconState.scale || 1.0;
+  
+  // Component with proper stacking and hardware acceleration
   return (
     <Ionicons 
       name={iconName} 
       size={effectiveSize} 
       color={color}
-      // Enable GPU acceleration for icon animations on Android
-      style={Platform.OS === 'android' ? { 
-        renderToHardwareTextureAndroid: true 
-      } : undefined}
+      // Fine-tuned hardware acceleration for optimal performance
+      style={{
+        transform: [{ scale }],
+        ...Platform.select({
+          android: { 
+            renderToHardwareTextureAndroid: true,
+            elevation: focused ? 1 : 0
+          }
+        })
+      }}
     />
   );
 };
@@ -62,9 +119,10 @@ const getIconName = (routeName) => {
 
 /**
  * Create complete tab bar configuration with material integration
+ * Provides platform-specific styling with full M3 implementation when supported
  * 
  * @param {Object} route - Current route object
- * @returns {Object} Tab bar configuration object with iOS 18 visual refinements
+ * @returns {Object} Tab bar configuration object with platform-specific enhancements
  */
 const getTabBarConfig = (route) => {
   const baseName = route.name;
@@ -76,27 +134,52 @@ const getTabBarConfig = (route) => {
     // Generate appropriate icon based on route
     tabBarIcon: getTabBarIcon(getIconName(baseName)),
     
-    // Apply consistent styling from tokens
+    // Apply consistent styling from tokens - enhanced with M3 support
     activeTintColor: tokens.colors.tint.tabBarActive,
     inactiveTintColor: tokens.colors.tint.tabBarInactive,
     
-    // Enhanced style with dynamic shadow parameters
+    // Enhanced style with dynamic shadow parameters and M3 support
     tabBarStyle: {
       ...getTabBarVisibility(route),
-      // Shadow implementation with physical properties
-      ...visualProperties.getShadowParams(platformDetection.isIOS ? 2 : 4),
+      // Platform-specific shadow implementation with M3 support
+      ...visualProperties.getShadowParams(useM3 ? 3 : platformDetection.isIOS ? 2 : 4),
+      // M3-specific height adjustments when supported
+      height: tokens.spacing.tabBar.height + tokens.spacing.tabBar.bottomInset,
     },
+    
+    // Enhanced label configuration for M3
+    tabBarLabelStyle: useM3 ? {
+      fontSize: tokens.typography.tabBar.label.fontSize,
+      fontWeight: tokens.typography.tabBar.label.fontWeight,
+      letterSpacing: tokens.typography.tabBar.label.letterSpacing,
+      marginTop: tokens.spacing.tabBar.iconLabelSpacing,
+      // Remove bottom margin as this is handled by container padding
+      marginBottom: 0,
+    } : undefined,
+    
+    // Enhanced item style with proper M3 padding
+    tabBarItemStyle: useM3 ? {
+      paddingTop: tokens.spacing.tabBar.paddingTop,
+      paddingBottom: tokens.spacing.tabBar.paddingBottom,
+    } : undefined,
     
     // Add badge for "new" features if needed (Insights tab)
     ...(baseName === 'Insights' ? {
       tabBarBadge: 'New',
-      // iOS 18 badge styling
+      // Badge styling enhanced for M3 compatibility
       tabBarBadgeStyle: {
         fontSize: 10,
         fontWeight: '500',
         lineHeight: 14,
         ...Platform.select({
           ios: {
+            marginTop: 2,
+          },
+          android: useM3 ? {
+            // M3 badge positioning
+            marginTop: 4,
+            marginRight: 4,
+          } : {
             marginTop: 2,
           }
         })
@@ -138,12 +221,63 @@ const getTabBarVisibility = (route) => {
 
 /**
  * Create custom tab bar that integrates with our material system
- * This implements iOS 18-style translucent tab bar
+ * This implements iOS 18-style translucent tab bar and Material Design 3 navigation bar
  * 
  * @param {Object} props - Props from React Navigation
  * @returns {React.ReactElement} Custom tab bar with material effects
  */
 const createCustomTabBar = (props) => {
+  // For M3 Tab Bar on Android, create the fully-featured implementation
+  if (useM3) {
+    return (
+      <View
+        style={[
+          styles.tabBar,
+          {
+            backgroundColor: tokens.colors.background.tabBar,
+            height: tokens.spacing.tabBar.height + platformDetection.getBottomInset(),
+            paddingBottom: platformDetection.getBottomInset(),
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: tokens.colors.border.tabBar,
+            // Add M3 elevation
+            ...visualProperties.getShadowParams(3),
+          }
+        ]}
+      >
+        <View style={styles.tabBarContent}>
+          {/* Wrap each tab bar button to add the active indicator */}
+          {React.Children.map(props.children, (child, index) => {
+            // Get state for this specific tab
+            const { state } = props;
+            const isFocused = state.index === index;
+            
+            // Get route for this tab
+            const route = state.routes[index];
+            
+            // Determine if tab has a label
+            const hasLabel = !!route.name;
+            
+            // Calculate tab width based on total width and tab count
+            const tabWidth = 100 / React.Children.count(props.children) + '%';
+            
+            // Wrap the tab button with our custom container
+            return (
+              <View style={[styles.m3TabContainer, { width: tabWidth }]}>
+                <M3ActiveIndicator 
+                  active={isFocused} 
+                  hasLabel={hasLabel}
+                  focused={true}
+                  tabWidth={100} // Will be adjusted by percentage width of container
+                />
+                {child}
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
+  
   // Use backdrop material for iOS 18 effect on capable devices
   if (platformDetection.isIOS && platformDetection.supportsBlurEffects) {
     return (
@@ -207,33 +341,51 @@ const getTabNavigatorScreenOptions = () => {
         /> : null
     ),
     
-    // Standard tab bar styles
+    // Standard tab bar styles - enhanced with M3 support
     tabBarStyle: {
-      backgroundColor: platformDetection.isIOS && platformDetection.supportsBlurEffects ? 
-        'transparent' : tokens.colors.background.tabBar,
+      backgroundColor: useM3 ? 
+        tokens.colors.background.tabBar : 
+        platformDetection.isIOS && platformDetection.supportsBlurEffects ? 
+          'transparent' : tokens.colors.background.tabBar,
       height: tokens.spacing.tabBar.height + platformDetection.getBottomInset(),
       paddingBottom: platformDetection.getBottomInset(),
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: platformDetection.isIOS && platformDetection.supportsBlurEffects ? 
         'rgba(200, 200, 200, 0.25)' : tokens.colors.border.tabBar,
-      ...visualProperties.getShadowParams(platformDetection.isIOS ? 1 : 3),
+      ...visualProperties.getShadowParams(useM3 ? 3 : platformDetection.isIOS ? 1 : 3),
     },
     
-    // iOS 18 animation transition specs
-    tabBarItemStyle: {
+    // M3-specific item styling
+    tabBarItemStyle: useM3 ? {
+      paddingTop: tokens.spacing.tabBar.paddingTop,
+      paddingBottom: tokens.spacing.tabBar.paddingBottom,
+    } : {
       paddingTop: 6,
     },
     
-    // Typography refinements for labels
+    // Typography refinements for labels with M3 support
     tabBarLabelStyle: {
-      fontSize: 10,
-      fontWeight: '500',
+      fontSize: tokens.typography.tabBar.label.fontSize,
+      fontWeight: tokens.typography.tabBar.label.fontWeight,
       marginBottom: Platform.OS === 'ios' ? 0 : 4,
-      ...visualProperties.getOpticalTypography(10, '500')
+      // M3-specific letter spacing
+      letterSpacing: useM3 ? tokens.typography.tabBar.label.letterSpacing : undefined,
+      // Additional M3-specific margin
+      marginTop: useM3 ? tokens.spacing.tabBar.iconLabelSpacing : undefined,
+      ...visualProperties.getOpticalTypography(
+        tokens.typography.tabBar.label.fontSize, 
+        tokens.typography.tabBar.label.fontWeight
+      )
     },
+    
+    // Enable M3 tab bar implementation
+    ...(useM3 ? {
+      tabBar: createCustomTabBar
+    } : {})
   };
 };
 
+// Optimized stylesheet for better performance
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
@@ -245,6 +397,19 @@ const styles = StyleSheet.create({
   tabBarContent: {
     flex: 1,
     flexDirection: 'row',
+  },
+  // M3-specific styles
+  m3TabContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  m3ActiveIndicator: {
+    position: 'absolute',
+    top: 16, // Align properly within 80dp container
+    zIndex: 0, // Behind the content
+    // Hardware acceleration
+    backfaceVisibility: 'hidden',
   }
 });
 
