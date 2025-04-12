@@ -9,15 +9,20 @@ import InsightsScreen from "../screens/InsightsScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import ScorecardScreen from "../screens/ScorecardScreen";
 
-// Import our navigation styling system
+// Import our navigation styling system with enhanced architectural components
 import navigationTheme from "../ui/navigation/theme";
-import { getTabBarConfig, getTabNavigatorScreenOptions } from "../ui/navigation/configs/tabBar";
+import { 
+  getTabBarConfig, 
+  getTabNavigatorScreenOptions,
+  createCustomTabBar 
+} from "../ui/navigation/configs/tabBar";
 import { 
   createStackNavigatorScreenOptions,
   createRoundsStackConfig, 
   createInsightsStackConfig, 
   createProfileStackConfig 
 } from "../ui/navigation/configs/stack";
+import platformDetection from "../ui/platform/detection";
 
 // Create stack navigators for each tab that needs nested navigation
 const RoundsStack = createStackNavigator();
@@ -102,8 +107,38 @@ const Tab = createBottomTabNavigator();
  * - Profile: For user account settings
  */
 export default function MainNavigator() {
+  // Get the base screen options for our tab navigator
+  const screenOptions = getTabNavigatorScreenOptions();
+  
+  // ARCHITECTURAL FIX: Correctly implement the custom tab bar renderer
+  // The key architectural correction is providing a render function that properly 
+  // evaluates M3 support at runtime and delegates rendering appropriately
+  
   return (
-    <Tab.Navigator screenOptions={getTabNavigatorScreenOptions()}>
+    <Tab.Navigator 
+      screenOptions={screenOptions}
+      // Provide a proper render function that receives props from React Navigation
+      tabBar={props => {
+        // Evaluate M3 support at runtime (ensure supportsM3 is called as a function)
+        const isM3Supported = platformDetection.supportsM3 && platformDetection.isAndroid;
+        
+        // Debugging to detect execution flow issues
+        console.log('Tab Bar Renderer: Platform detection state', { 
+          isAndroid: platformDetection.isAndroid, 
+          supportsM3: platformDetection.supportsM3,
+          isM3Supported 
+        });
+        
+        // Return the appropriate component based on platform capability
+        if (isM3Supported) {
+          // Apply the custom M3 tab bar by executing the factory with props
+          return createCustomTabBar(props);
+        }
+        
+        // Fall back to default tab bar (React Navigation will use its built-in renderer)
+        return undefined;
+      }}
+    >
       <Tab.Screen
         name="HomeTab"
         component={HomeStack}
